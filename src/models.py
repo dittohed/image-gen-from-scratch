@@ -49,18 +49,52 @@ class VariationalAutoencoder(nn.Module):
         return x_reconstr, latent_sampled, mu, logvar
     
 
+class UNet(nn.Module):
+    """
+    Simple U-Net with nearest-neighbors upsampling.
+    """
+
+    def __init__(self, in_channels: int, out_channels: int):
+        super().__init__()
+
+        # All the convs keep the spatial dims ('same' convs)
+        self.convs_down = nn.ModuleList([
+            nn.Conv2d(in_channels, 32, kernel_size=5, padding=2),
+            nn.Conv2d(32, 64, kernel_size=5, padding=2),
+            nn.Conv2d(64, 64, kernel_size=5, padding=2)
+        ])
+        self.convs_up = nn.ModuleList([
+            nn.Conv2d(64, 64, kernel_size=5, padding=2),
+            nn.Conv2d(128, 32, kernel_size=5, padding=2),
+            nn.Conv2d(64, out_channels, kernel_size=5, padding=2)
+        ])
+
+        self.downscale = nn.MaxPool2d(kernel_size=2)
+        self.upscale = nn.Upsample(scale_factor=2)
+
+        self.activation_fn = nn.SiLU()
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        feature_maps = []
+
+        for i in range(2):
+            x = self.convs_down[i](x)
+            x = self.activation_fn(x)
+            feature_maps.append(x)
+            x = self.downscale(x)
+        x = self.convs_down[2](x)
+
+        for i in range(2):
+            x = self.convs_up[i](x)
+            x = self.activation_fn(x)
+            x = self.upscale(x)
+            x = torch.cat([x, feature_maps.pop()], dim=1)
+        x = self.convs_up[2](x)
+
+        return x
+
+
 if __name__ == '__main__':
-    INPUT_DIM = 28*28
-    HIDDEN_DIM = 256
-    LATENT_DIM = 128
-    BATCH_SIZE = 8
-
-    model = VariationalAutoencoder(
-        input_dim=INPUT_DIM,
-        hidden_dim=HIDDEN_DIM,
-        latent_dim=LATENT_DIM
-    )
-    x = torch.randn((BATCH_SIZE, INPUT_DIM))
-    x_reconstr, latent_sampled, mu, logvar = model(x)
-
-    print((x_reconstr.shape, latent_sampled.shape, mu.shape, logvar.shape))
+    model = UNet(in_channels=3, out_channels=1)
+    x = torch.randn((8, 3, 28, 28))
+    print(model(x).shape)
